@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: scaling_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d scaling_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  app1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment: &app_environment
+      INSTANCE_ID: instance-1
+      PORT: "5001"
+      COUNTER_MODE: postgres
+      ENABLE_JOBS: "true"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: scaling_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  app2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      <<: *app_environment
+      INSTANCE_ID: instance-2
+      PORT: "5001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  app3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      <<: *app_environment
+      INSTANCE_ID: instance-3
+      PORT: "5001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  balancer:
+    build:
+      context: .
+      dockerfile: balancer/Dockerfile
+    environment:
+      BALANCER_PORT: "8000"
+      INSTANCES: "http://app1:5001,http://app2:5001,http://app3:5001"
+    ports:
+      - "8000:8000"
+    depends_on:
+      - app1
+      - app2
+      - app3
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
